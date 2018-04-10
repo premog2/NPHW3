@@ -1,3 +1,5 @@
+#include <ctype.h>
+#include <err.h>
 #include <stdio.h>
 #include <netdb.h>
 #include <fcntl.h>
@@ -7,34 +9,42 @@
 #include <string.h>
 #include <signal.h>
 #include <arpa/inet.h>
-#include <sys/types.h>
-#include <sys/wait.h>
 #include <netinet/in.h>
+#include <sys/wait.h>
+#include <sys/stat.h>
+#include <sys/types.h>
 #include <sys/socket.h>
 #include <assert.h>
 
 #define BUFSIZE 1024
+#define CMDSIZE 16
 
-struct channel {
+char *USER = "USER";
+
+typedef struct user {
 	char *name;
+} user;
 
-};
+typedef struct channel {
+	char *name;
+} channel;
 
 
 int main(int argc, char *argv[]) {
 	char buffer[BUFSIZE];
+	char cmd[CMDSIZE];
 	int pid, n, optval;
-	struct sockaddr_in serveraddr;
-	socklen_t sockaddr_len;
+	struct sockaddr_in serveraddr, client;
+	socklen_t sockaddr_len, client_len;
 
 	/* port number */
-	unsigned short port = 10101;
+	unsigned short port = 21201;
 
 	/* socket */
 	int sd = socket(AF_INET, SOCK_STREAM, 0);
 
 	if (sd < 0) {
-		perror("socket() failed");
+		perror("socket()");
 		exit(EXIT_FAILURE);
 	}
 
@@ -48,28 +58,62 @@ int main(int argc, char *argv[]) {
 	serveraddr.sin_port = htons(0);
 	serveraddr.sin_family = AF_INET;
 
+	client_len = sizeof(client);
+
 	// bind socket
 	if((bind(sd, (struct sockaddr*) &serveraddr, sockaddr_len)) < 0) {
 		perror("bind()");
 		return EXIT_FAILURE;
 	}
 
-	// getsockname(sd, (struct sockaddr*) &serveraddr, &sockaddr_len);
+	getsockname(sd, (struct sockaddr*) &serveraddr, &sockaddr_len);
 	printf("Port: %d\n", ntohs(serveraddr.sin_port));
-	
+	listen(sd, 5);
+
 	while(1) {
-	intr_recv:
-		printf("%d: Awaiting new connection...\n", getpid()); 
 
 		/* blocking call */ 
-		n = recvfrom(sd, buffer, BUFSIZE, 0, (struct sockaddr*) &serveraddr, &sockaddr_len);
-		if(n < 0) {
-			if(errno == EINTR) goto intr_recv;
-			perror("recvfrom()");
+		int newsd = accept(sd, (struct sockaddr *)&client, &client_len);
+		if(newsd < 0) {
+			perror("accept");
 			return EXIT_FAILURE;
 		}
 
 		printf("%d: Received Connection...\n", getpid());
+
+		memset(&buffer, 0, sizeof(buffer));
+		memset(&cmd, 0, sizeof(cmd));
+
+		n = recv(newsd, buffer, BUFSIZE, 0);
+		if(n < 0) {
+			perror("recv()");
+			exit(EXIT_FAILURE);
+		}
+
+		strncpy(cmd, buffer, 4);
+		if(!strcmp(cmd, USER)) {
+			printf("%d: welcome USER\n", getpid());
+			printf("%s\n", &buffer[0]+5);
+		}
+		else {
+			// todo send this message to client and close connection
+			printf("Invalid command, please identify yourself with USER.");
+			close(newsd);
+		}
+		// do {
+		// 	n = recv(newsd, buffer, BUFSIZE, 0);
+		// 	if(n < 0) {
+		// 		perror("recv()");
+		// 		exit(EXIT_FAILURE);
+		// 	} else if(n == 0) {
+		// 		break;
+		// 	}
+		// 	else {
+		// 		// buffer[n] = '\0';		
+		// 		printf("%d: Received \"%s\"\n", getpid(), buffer);
+		// 	}
+		// }
+		// while(n > 0);
 	}				
 
 
