@@ -1,4 +1,5 @@
 #include <ctype.h>
+#include <stdbool.h>
 #include <err.h>
 #include <stdio.h>
 #include <netdb.h>
@@ -20,6 +21,13 @@
 #define CMDSIZE 16
 
 char *USER = "USER";
+char *LIST = "LIST";
+char *JOIN = "JOIN";
+char *PART = "PART";
+char *OPERATOR = "OPERATOR";
+char *KICK = "KICK";
+char *PRIVMSG = "PRIVMSG";
+char *QUIT = "QUIT";
 
 typedef struct user {
 	char *name;
@@ -29,16 +37,36 @@ typedef struct channel {
 	char *name;
 } channel;
 
+int get_first_word_of_buffer(const char buffer[], int size, char **first_word);
+
+bool is_cmd_USER(char *cmd) {
+	return !strcmp(cmd, USER);
+}
+
+bool is_cmd_QUIT(char *cmd) {
+	return !strcmp(cmd, QUIT);
+}
+
+bool is_cmd_ANY(char *cmd) {
+	return  strcmp(cmd, USER) == 0 ||
+			strcmp(cmd, LIST) == 0 ||
+			strcmp(cmd, JOIN) == 0 ||
+			strcmp(cmd, PART) == 0 ||
+			strcmp(cmd, OPERATOR) == 0 ||
+			strcmp(cmd, KICK) == 0 ||
+			strcmp(cmd, PRIVMSG) == 0 ||
+			strcmp(cmd, QUIT) == 0;
+}
 
 int main(int argc, char *argv[]) {
 	char buffer[BUFSIZE];
-	char cmd[CMDSIZE];
+	char *cmd;
 	int pid, n, optval;
 	struct sockaddr_in serveraddr, client;
 	socklen_t sockaddr_len, client_len;
 
 	/* port number */
-	unsigned short port = 21201;
+	// unsigned short port = 21201;
 
 	/* socket */
 	int sd = socket(AF_INET, SOCK_STREAM, 0);
@@ -79,44 +107,71 @@ int main(int argc, char *argv[]) {
 			return EXIT_FAILURE;
 		}
 
-		printf("%d: Received Connection...\n", getpid());
-
-		memset(&buffer, 0, sizeof(buffer));
-		memset(&cmd, 0, sizeof(cmd));
-
-		n = recv(newsd, buffer, BUFSIZE, 0);
-		if(n < 0) {
-			perror("recv()");
+		// printf("%d: Received Connection...\n", getpid());
+		pid = fork();
+		if(pid < 0) {
+			perror("fork()");
 			exit(EXIT_FAILURE);
 		}
+		else if(pid == 0) { // child
 
-		strncpy(cmd, buffer, 4);
-		if(!strcmp(cmd, USER)) {
-			printf("%d: welcome USER\n", getpid());
-			printf("%s\n", &buffer[0]+5);
+			user u;
+
+			do {
+				memset(&buffer, 0, sizeof(buffer));
+
+				n = recv(newsd, buffer, BUFSIZE, 0);
+				if(n < 0) {
+					perror("recv()");
+					exit(EXIT_FAILURE);
+				} else if(n == 0) {
+					printf("received nothing\n");
+					continue;
+				}
+				else {
+					int cmd_len = get_first_word_of_buffer(buffer, n, &cmd);
+					printf("Received command %s\n", cmd);
+
+					if(is_cmd_USER(cmd)) {
+						printf("Welcome, %s\n", &buffer[0]+cmd_len+1);
+						memcpy(u.name, &buffer[0]+cmd_len+1, n-cmd_len);
+						printf("%s", u.name);
+					}
+					else if(is_cmd_QUIT(cmd)) {
+						close(newsd);
+						break;
+					}
+					else if(is_cmd_ANY(cmd)) {
+						// todo send this message to client and close connection
+						printf("Invalid command, please identify yourself with USER.\n");
+						close(newsd);
+					}
+					else {
+						printf("Invalid command.\n");
+					}
+					free(cmd);
+				}
+			}
+			while(n > 0);
 		}
 		else {
-			// todo send this message to client and close connection
-			printf("Invalid command, please identify yourself with USER.");
 			close(newsd);
+			continue;
 		}
-		// do {
-		// 	n = recv(newsd, buffer, BUFSIZE, 0);
-		// 	if(n < 0) {
-		// 		perror("recv()");
-		// 		exit(EXIT_FAILURE);
-		// 	} else if(n == 0) {
-		// 		break;
-		// 	}
-		// 	else {
-		// 		// buffer[n] = '\0';		
-		// 		printf("%d: Received \"%s\"\n", getpid(), buffer);
-		// 	}
-		// }
-		// while(n > 0);
 	}				
 
 
 
 	return EXIT_SUCCESS;
+}
+
+int get_first_word_of_buffer(const char buffer[], int size, char **first_word) {
+	int i;
+	*first_word = (char *)calloc(size, sizeof(char));
+	for(i = 0; i < size; i++) {
+		if(buffer[i] == ' ' || buffer[i] == '\t' || buffer[i] == '\n')
+			break;
+	}
+	memcpy(*first_word, buffer, i);
+	return i;
 }
